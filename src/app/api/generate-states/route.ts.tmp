@@ -1,0 +1,247 @@
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
+import { cookies } from 'next/headers'
+import { generateWithDeepseek } from '@/lib/deepseek-config'
+import type { ConversationStates } from '@/types/conversation-states'
+
+// Define request types
+interface GenerateStatesRequest {
+  conversationId: string
+  transcript: string
+}
+
+// Helper function to check if an object has the required structure
+function isValidAnalysisResult(obj: any): boolean {
+  return (
+    obj &&
+    typeof obj === 'object' &&
+    obj.userAnalysis &&
+    typeof obj.userAnalysis === 'object' &&
+    obj.userAnalysis.communicationStyle &&
+    typeof obj.userAnalysis.communicationStyle === 'object' &&
+    obj.userAnalysis.hesitations &&
+    typeof obj.userAnalysis.hesitations === 'object' &&
+    obj.userAnalysis.grammarAndStructure &&
+    typeof obj.userAnalysis.grammarAndStructure === 'object'
+  )
+}
+
+// Helper to create a base state structure
+function createBaseState(): ConversationStates {
+  return {
+    userAnalysis: {
+      hesitations: {
+        count: 0,
+        instances: [],
+        impact: ''
+      },
+      grammarAndStructure: {
+        score: 0,
+        issues: [],
+        suggestions: []
+      },
+      communicationStyle: {
+        clarity: 0,
+        confidence: 0,
+        fluency: 0,
+        description: ''
+      },
+      improvements: {
+        immediate: [],
+        longTerm: []
+      }
+    },
+    conversationFlow: {
+      turnCount: 0,
+      userResponseTimes: [],
+      averageTurnLength: 0,
+      topicCoherence: 0,
+      description: ''
+    },
+    speechPatterns: {
+      fillers: {
+        words: [],
+        frequency: 0
+      },
+      repetitions: [],
+      pacingMetrics: {
+        hesitation_marker_count: 0
+      }
+    },
+    emotionalState: [],
+    mandatoryPhrasesUsed: [],
+    callDurationSegments: []
+  }
+}
+
+// Helper to normalize analysis results
+function normalizeStates(states: any): ConversationStates {
+  if (!states || typeof states !== 'object') {
+    console.error('Invalid states object:', states)
+    throw new Error('Invalid analysis result format')
+  }
+
+  const normalized = createBaseState()
+
+  try {
+    // Merge user analysis
+    if (states.userAnalysis) {
+      Object.assign(normalized.userAnalysis.hesitations, states.userAnalysis.hesitations || {})
+      Object.assign(normalized.userAnalysis.grammarAndStructure, states.userAnalysis.grammarAndStructure || {})
+      Object.assign(normalized.userAnalysis.communicationStyle, states.userAnalysis.communicationStyle || {})
+      Object.assign(normalized.userAnalysis.improvements, states.userAnalysis.improvements || {})
+    }
+
+    // Merge conversation flow
+    if (states.conversationFlow) {
+      Object.assign(normalized.conversationFlow, states.conversationFlow)
+      normalized.conversationFlow.userResponseTimes = Array.isArray(states.conversationFlow.userResponseTimes)
+        ? states.conversationFlow.userResponseTimes
+        : []
+    }
+
+    // Merge speech patterns
+    if (states.speechPatterns) {
+      Object.assign(normalized.speechPatterns, states.speechPatterns)
+      normalized.speechPatterns.fillers.words = Array.isArray(states.speechPatterns.fillers?.words)
+        ? states.speechPatterns.fillers.words
+        : []
+      normalized.speechPatterns.repetitions = Array.isArray(states.speechPatterns.repetitions)
+        ? states.speechPatterns.repetitions
+        : []
+    }
+
+    // Ensure arrays
+    normalized.userAnalysis.hesitations.instances = Array.isArray(states.userAnalysis?.hesitations?.instances) 
+      ? states.userAnalysis.hesitations.instances 
+      : []
+    normalized.userAnalysis.grammarAndStructure.issues = Array.isArray(states.userAnalysis?.grammarAndStructure?.issues)
+      ? states.userAnalysis.grammarAndStructure.issues
+      : []
+    normalized.userAnalysis.improvements.immediate = Array.isArray(states.userAnalysis?.improvements?.immediate)
+      ? states.userAnalysis.improvements.immediate
+      : []
+    normalized.userAnalysis.improvements.longTerm = Array.isArray(states.userAnalysis?.improvements?.longTerm)
+      ? states.userAnalysis.improvements.longTerm
+      : []
+
+    // Ensure arrays for optional fields
+    normalized.emotionalState = Array.isArray(states.emotionalState) ? states.emotionalState : []
+    normalized.mandatoryPhrasesUsed = Array.isArray(states.mandatoryPhrasesUsed) ? states.mandatoryPhrasesUsed : []
+    normalized.callDurationSegments = Array.isArray(states.callDurationSegments) ? states.callDurationSegments : []
+
+    // Ensure numbers are within valid ranges (0-1)
+    normalized.userAnalysis.grammarAndStructure.score = Math.max(0, Math.min(1, Number(states.userAnalysis?.grammarAndStructure?.score) || 0))
+    normalized.userAnalysis.communicationStyle.clarity = Math.max(0, Math.min(1, Number(states.userAnalysis?.communicationStyle?.clarity) || 0))
+    normalized.userAnalysis.communicationStyle.confidence = Math.max(0, Math.min(1, Number(states.userAnalysis?.communicationStyle?.confidence) || 0))
+    normalized.userAnalysis.communicationStyle.fluency = Math.max(0, Math.min(1, Number(states.userAnalysis?.communicationStyle?.fluency) || 0))
+    normalized.conversationFlow.topicCoherence = Math.max(0, Math.min(1, Number(states.conversationFlow?.topicCoherence) || 0))
+
+    // Ensure positive numbers
+    normalized.userAnalysis.hesitations.count = Math.max(0, Number(states.userAnalysis?.hesitations?.count) || 0)
+    normalized.conversationFlow.turnCount = Math.max(0, Number(states.conversationFlow?.turnCount) || 0)
+    normalized.conversationFlow.averageTurnLength = Math.max(0, Number(states.conversationFlow?.averageTurnLength) || 0)
+    normalized.speechPatterns.fillers.frequency = Math.max(0, Number(states.speechPatterns?.fillers?.frequency) || 0)
+    normalized.speechPatterns.pacingMetrics.hesitation_marker_count = Math.max(0, Number(states.speechPatterns?.pacingMetrics?.hesitation_marker_count) || 0)
+
+    return normalized
+  } catch (error) {
+    console.error('Error normalizing states:', error)
+    throw new Error('Failed to normalize analysis results')
+  }
+}
+
+// Analyze a conversation transcript
+async function analyzeTranscript(transcript: string) {
+  if (!transcript || typeof transcript !== 'string') {
+    throw new Error('Invalid transcript format')
+  }
+
+  try {
+    const result = await generateWithDeepseek(transcript)
+    
+    // Parse the result if it's a string
+    const analysisData = typeof result === 'string' ? JSON.parse(result) : result
+    
+    // Validate the structure
+    if (!isValidAnalysisResult(analysisData)) {
+      throw new Error('Invalid analysis result structure')
+    }
+
+    return analysisData
+  } catch (error) {
+    console.error('Analysis generation error:', error)
+    throw new Error('Failed to generate valid analysis')
+  }
+}
+
+// Main API handler
+export async function POST(request: Request) {
+  try {
+    // Initialize Supabase client
+    const cookieStore = cookies()
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore })
+
+    // Check auth session
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Parse request and validate
+    const requestData = await request.clone().json()
+    const { conversationId, transcript } = requestData as GenerateStatesRequest
+    
+    if (!conversationId || !transcript) {
+      return new Response(
+        JSON.stringify({ error: 'Missing required fields: conversationId and transcript' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Check existing analysis
+    const { data: conversation } = await supabase
+      .from('conversations')
+      .select('stats')
+      .eq('id', conversationId)
+      .single()
+
+    if (conversation?.stats) {
+      return new Response(
+        JSON.stringify({ states: conversation.stats }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Generate new analysis
+    const analysisResult = await analyzeTranscript(transcript)
+    const normalizedStates = normalizeStates(analysisResult)
+
+    // Save to database
+    const { error: updateError } = await supabase
+      .from('conversations')
+      .update({ stats: normalizedStates })
+      .eq('id', conversationId)
+
+    if (updateError) {
+      throw updateError
+    }
+
+    return new Response(
+      JSON.stringify({ states: normalizedStates }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Route handler error:', error)
+    return new Response(
+      JSON.stringify({ 
+        error: 'Failed to generate analysis',
+        details: error instanceof Error ? error.message : 'Unknown error occurred'
+      }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+}

@@ -1,0 +1,681 @@
+'use client'
+
+import { useEffect, useState, useCallback, useRef } from 'react'
+import { useParams } from 'next/navigation'
+import { useSupabase } from '@/components/providers/supabase-provider'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Card } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Label } from '@/components/ui/label'
+import { Separator } from '@/components/ui/separator'
+import { FadeInUp, FadeInStagger, FadeInStaggerItem } from '@/components/ui/fade-in-up'
+import {
+  PlayCircle,
+  DownloadCloud,
+  Share2,
+  Clock,
+  BarChart,
+  FileText,
+  MessageSquare,
+  Loader2,
+  Wand2,
+  AlertTriangle
+} from 'lucide-react'
+import { ConversationStates } from '@/types/conversation-states'
+import { ConversationAnalysis } from '@/components/conversation-analysis/conversation-analysis'
+import { Slider } from '@/components/ui/slider'
+import { toast } from 'sonner'
+
+export default function ConversationPage() {
+  const params = useParams()
+  const { supabase } = useSupabase()
+  const [loading, setLoading] = useState(true)
+  const [vapiData, setVapiData] = useState<any>(null)
+  const [analysis, setAnalysis] = useState<ConversationStates | null>(null)
+  const [generatingAnalysis, setGeneratingAnalysis] = useState(false)
+  const [activeTab, setActiveTab] = useState('transcript')
+  const [realtimeTranscript, setRealtimeTranscript] = useState<string>('')
+  const [transcriptMessages, setTranscriptMessages] = useState<TranscriptMessage[]>([])
+  const [callStatus, setCallStatus] = useState<'queued' | 'connecting' | 'active' | 'completed' | null>(null)
+  
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  
+  const [playerState, setPlayerState] = useState<AudioPlayerState>({
+    isPlaying: false,
+    currentTime: 0,
+    duration: 0,
+    volume: 1,
+    isMuted: false
+  })
+  const [audioState, setAudioState] = useState({
+    isPlaying: false,
+    currentTime: 0,
+    duration: 0,
+    volume: 1
+  })
+
+  const togglePlay = useCallback(() => {
+    if (audioRef.current) {
+      if (audioState.isPlaying) {
+        audioRef.current.pause()
+      } else {
+        audioRef.current.play()
+      }
+    }
+  }, [audioState.isPlaying])
+
+  const handleTimeUpdate = useCallback(() => {
+    if (audioRef.current) {
+      setAudioState(prev => ({
+        ...prev,
+        currentTime: audioRef.current?.currentTime || 0
+      }))
+    }
+  }, [])
+
+  const handleLoadedMetadata = useCallback(() => {
+    if (audioRef.current) {
+      setAudioState(prev => ({
+        ...prev,
+        duration: audioRef.current?.duration || 0
+      }))
+    }
+  }, [])
+
+  const handleVolumeChange = useCallback((newVolume: number[]) => {
+    if (audioRef.current) {
+      audioRef.current.volume = newVolume[0]
+      setAudioState(prev => ({ ...prev, volume: newVolume[0] }))
+    }
+  }, [])
+
+  const handleSeek = useCallback((newTime: number[]) => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = newTime[0]
+      setAudioState(prev => ({ ...prev, currentTime: newTime[0] }))
+    }
+  }, [])
+
+  const formatTime = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60)
+    const remainingSeconds = Math.floor(seconds % 60)
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
+  }
+
+  // Fetch conversation details including VAPI data
+  useEffect(() => {
+    const fetchDetails = async () => {
+      try {
+        setLoading(true)
+        
+        // Get conversation from Supabase
+        const { data: conversation, error } = await supabase
+          .from('conversations')
+          .select('*')
+          .eq('id', params.id)
+          .single()
+
+        if (error) throw error
+
+        // Get VAPI call details
+        if (conversation?.vapi_call_id) {
+          const response = await fetch(`https://api.vapi.ai/call/${conversation.vapi_call_id}`, {
+            headers: {
+              'Authorization': `Bearer 7d671318-0ecb-4e7a-a388-36b3ede280b9`
+            }
+          })
+
+          if (!response.ok) throw new Error('Failed to fetch VAPI data')
+          const vapiData = await response.json()
+          setVapiData(vapiData)
+
+          // Set analysis if it exists in Supabase
+          if (conversation.stats) {
+            setAnalysis(conversation.stats)
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching details:', error)
+        toast.error('Failed to load conversation details')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchDetails()
+  }, [params.id, supabase])
+
+  const generateAnalysis = async () => {
+    if (!vapiData?.messages) return
+
+    try {
+      setGeneratingAnalysis(true)
+      toast.loading('Generating conversation insights...', { id: 'analysis' })
+
+      // Get conversation messages formatted for analysis
+      const userMessages = vapiData.messages
+        .filter((msg: any) => msg.role === 'user')
+        .map((msg: any) => msg.message)
+        .join('\n')
+
+      const response = await fetch('/api/generate-states', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId: params.id,
+          transcript: userMessages
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.details || 'Failed to generate analysis')
+      }
+
+      const data = await response.json()
+      
+      if (data.error) {
+        throw new Error(data.details || data.error)
+      }
+      
+      if (data.states) {
+        setAnalysis(data.states)
+        toast.success('Analysis completed successfully', { id: 'analysis' })
+      }
+    } catch (error) {
+      console.error('Error generating analysis:', error)
+      toast.error(
+        error instanceof Error 
+          ? error.message 
+          : 'Failed to generate analysis. Please try again.', 
+        { id: 'analysis' }
+      )
+    } finally {
+      setGeneratingAnalysis(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex h-[80vh] items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+          <p className="text-sm text-muted-foreground">Loading conversation...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!vapiData) {
+    return (
+      <div className="flex h-[80vh] items-center justify-center">
+        <div className="text-center space-y-4">
+          <AlertTriangle className="h-12 w-12 text-yellow-500 mx-auto" />
+          <h2 className="text-2xl font-bold">Conversation Not Found</h2>
+          <p className="text-muted-foreground">The conversation details could not be loaded.</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <FadeInUp>
+      <div className="container max-w-7xl mx-auto py-4 sm:py-8 px-3 sm:px-4 space-y-6 sm:space-y-8">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-0 sm:justify-between">
+          <div className="space-y-1">
+            <h1 className="text-2xl sm:text-3xl font-bold">Conversation Details</h1>
+            <p className="text-sm sm:text-base text-muted-foreground">
+              {new Date(vapiData.startedAt).toLocaleString()}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            <Button
+              variant="outline" 
+              size="sm" 
+              className="gap-2"
+              onClick={async () => {
+                try {
+                  // Update is_public to true
+                  const { error } = await supabase
+                    .from('conversations')
+                    .update({ is_public: true })
+                    .eq('id', params.id)
+
+                  if (error) throw error
+
+                  // Copy URL to clipboard
+                  await navigator.clipboard.writeText(window.location.href)
+                  toast.success('Link copied to clipboard!')
+                } catch (err) {
+                  console.error('Error sharing conversation:', err)
+                  toast.error('Failed to share conversation')
+                }
+              }}
+            >
+              <Share2 className="w-4 h-4" />
+              Share
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              asChild
+              className="gap-2"
+              onClick={() => window.open(vapiData.artifact.recording.stereoUrl)}
+            >
+              <a href={vapiData.artifact.recording.stereoUrl} target="_blank" rel="noopener noreferrer">
+                <DownloadCloud className="w-4 h-4" />
+                Download Recording
+              </a>
+            </Button>
+          </div>
+        </div>
+
+        {/* Quick Stats */}
+        <FadeInStagger>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
+            <FadeInStaggerItem>
+              <Card className="p-4 sm:p-6">
+                <div className="flex items-center gap-3 sm:gap-4">
+                  <Clock className="w-6 h-6 sm:w-8 sm:h-8 text-primary/20" />
+                  <div>
+                    <p className="text-xs sm:text-sm text-muted-foreground">Duration</p>
+                    <p className="text-2xl font-bold">
+                      {(() => {
+                        const totalSeconds = Math.round((new Date(vapiData.endedAt).getTime() - new Date(vapiData.startedAt).getTime()) / 1000)
+                        const hours = Math.floor(totalSeconds / 3600)
+                        const minutes = Math.floor((totalSeconds % 3600) / 60)
+                        const seconds = totalSeconds % 60
+                        
+                        const parts = []
+                        if (hours > 0) parts.push(`${hours}h`)
+                        if (minutes > 0 || hours > 0) parts.push(`${minutes}m`)
+                        parts.push(`${seconds}s`)
+                        
+                        return parts.join(' ')
+                      })()}
+                    </p>
+                  </div>
+                </div>
+              </Card>
+            </FadeInStaggerItem>
+            
+            <FadeInStaggerItem>
+              <Card className="p-4 sm:p-6">
+                <div className="flex items-center gap-3 sm:gap-4">
+                  <MessageSquare className="w-6 h-6 sm:w-8 sm:h-8 text-primary/20" />
+                  <div>
+                    <p className="text-xs sm:text-sm text-muted-foreground">Messages</p>
+                    <p className="text-2xl font-bold">{vapiData.messages.length}</p>
+                  </div>
+                </div>
+              </Card>
+            </FadeInStaggerItem>
+
+            <FadeInStaggerItem>
+              <Card className="p-4 sm:p-6">
+                <div className="flex items-center gap-3 sm:gap-4">
+                  <BarChart className="w-6 h-6 sm:w-8 sm:h-8 text-primary/20" />
+                  <div>
+                    <p className="text-xs sm:text-sm text-muted-foreground">Credits Used</p>
+                    <p className="text-xl sm:text-2xl font-bold">
+                      {(() => {
+                        const durationInSeconds = (new Date(vapiData.endedAt).getTime() - new Date(vapiData.startedAt).getTime()) / 1000;
+                        const creditsUsed = durationInSeconds / 60; // 1 credit per minute
+                        return creditsUsed.toFixed(2);
+                      })()}
+                    </p>
+                  </div>
+                </div>
+              </Card>
+            </FadeInStaggerItem>
+          </div>
+        </FadeInStagger>
+
+        {/* Main Content */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <TabsList className="w-full justify-start border-b rounded-none h-10 sm:h-12 bg-transparent p-0 overflow-x-auto">
+              <TabsTrigger
+                value="transcript"
+                className="data-[state=active]:border-primary data-[state=active]:bg-transparent border-b-2 border-transparent px-3 sm:px-4 text-sm sm:text-base min-w-[100px]"
+              >
+                Transcript
+              </TabsTrigger>
+              <TabsTrigger
+                value="audio"
+                className="data-[state=active]:border-primary data-[state=active]:bg-transparent border-b-2 border-transparent px-3 sm:px-4 text-sm sm:text-base min-w-[100px]"
+              >
+                Audio
+              </TabsTrigger>
+              <TabsTrigger
+                value="analysis"
+                className="data-[state=active]:border-primary data-[state=active]:bg-transparent border-b-2 border-transparent px-3 sm:px-4 text-sm sm:text-base min-w-[100px]"
+              >
+                Analysis
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="transcript" className="pt-6">
+              <ScrollArea className="h-[600px] rounded-md border p-4">
+                {vapiData.messages.map((msg: any, i: number) => (
+                  msg.role !== 'system' && (
+                    <div key={i} className="mb-4">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Badge variant={msg.role === 'user' ? 'default' : 'secondary'}>
+                          {msg.role === 'user' ? 'You' : 'Assistant'}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(msg.time).toLocaleTimeString()}
+                        </span>
+                      </div>
+                      <p className="text-sm">{msg.message}</p>
+                    </div>
+                  )
+                ))}
+              </ScrollArea>
+            </TabsContent>
+
+            <TabsContent value="audio" className="pt-6">
+              <div className="space-y-8">
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-lg font-semibold">Combined Recording</h3>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => {
+                        const link = document.createElement('a');
+                        link.href = vapiData.artifact.recording.mono.combinedUrl;
+                        link.download = `conversation-${params.id}.wav`;
+                        link.click();
+                      }}
+                      className="gap-2"
+                    >
+                      <DownloadCloud className="w-4 h-4" />
+                      Download
+                    </Button>
+                  </div>
+                  <Card className="p-4">
+                    <div className="flex items-center gap-4">
+                      <audio 
+                        ref={audioRef}
+                        controls 
+                        className="flex-1" 
+                        src={vapiData.artifact.recording.mono.combinedUrl}
+                      />
+                    </div>
+                  </Card>
+                </div>
+
+                <Separator className="my-6" />
+
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-lg font-semibold">Individual Tracks</h3>
+                    <div className="text-sm text-muted-foreground">
+                      Listen to each participant separately
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <Card className="p-4">
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-sm font-medium">Your Audio</h4>
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => {
+                              const link = document.createElement('a');
+                              link.href = vapiData.artifact.recording.mono.customerUrl;
+                              link.download = `user-${params.id}.wav`;
+                              link.click();
+                            }}
+                          >
+                            <DownloadCloud className="w-4 h-4" />
+                          </Button>
+                        </div>
+                        <audio 
+                          controls 
+                          className="w-full" 
+                          src={vapiData.artifact.recording.mono.customerUrl}
+                        />
+                      </div>
+                    </Card>
+                    <Card className="p-4">
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-sm font-medium">Assistant Audio</h4>
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => {
+                              const link = document.createElement('a');
+                              link.href = vapiData.artifact.recording.mono.assistantUrl;
+                              link.download = `assistant-${params.id}.wav`;
+                              link.click();
+                            }}
+                          >
+                            <DownloadCloud className="w-4 h-4" />
+                          </Button>
+                        </div>
+                        <audio 
+                          controls 
+                          className="w-full" 
+                          src={vapiData.artifact.recording.mono.assistantUrl}
+                        />
+                      </div>
+                    </Card>
+                  </div>
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="analysis" className="pt-6">
+              {!analysis ? (
+                <div className="text-center py-12">
+                  <div className="max-w-md mx-auto space-y-4">
+                    <Wand2 className="w-12 h-12 text-primary/20 mx-auto" />
+                    <h3 className="text-lg font-semibold">Generate Analysis</h3>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Generate an AI-powered analysis of your conversation to get insights into communication patterns, speaking style, and areas for improvement.
+                    </p>
+                    <Button 
+                      onClick={generateAnalysis} 
+                      disabled={generatingAnalysis}
+                      className="gap-2"
+                    >
+                      {generatingAnalysis ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Generating Analysis...
+                        </>
+                      ) : (
+                        <>
+                          <Wand2 className="w-4 w-4" />
+                          Generate Analysis
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-8">
+                  {/* Communication Style */}
+                  <Card className="p-6">
+                    <h3 className="text-lg font-semibold mb-4">Communication Style</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <div>
+                        <h4 className="text-sm font-medium mb-2">Clarity</h4>
+                        <div className="flex items-center gap-2">
+                          <div className="h-2 flex-1 bg-gray-200 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-primary transition-all duration-500" 
+                              style={{ width: `${(analysis.userAnalysis?.communicationStyle?.clarity || 0) * 100}%` }}
+                            />
+                          </div>
+                          <span className="text-sm text-muted-foreground">
+                            {Math.round((analysis.userAnalysis?.communicationStyle?.clarity || 0) * 100)}%
+                          </span>
+                        </div>
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-medium mb-2">Confidence</h4>
+                        <div className="flex items-center gap-2">
+                          <div className="h-2 flex-1 bg-gray-200 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-primary transition-all duration-500" 
+                              style={{ width: `${(analysis.userAnalysis?.communicationStyle?.confidence || 0) * 100}%` }}
+                            />
+                          </div>
+                          <span className="text-sm text-muted-foreground">
+                            {Math.round((analysis.userAnalysis?.communicationStyle?.confidence || 0) * 100)}%
+                          </span>
+                        </div>
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-medium mb-2">Fluency</h4>
+                        <div className="flex items-center gap-2">
+                          <div className="h-2 flex-1 bg-gray-200 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-primary transition-all duration-500" 
+                              style={{ width: `${(analysis.userAnalysis?.communicationStyle?.fluency || 0) * 100}%` }}
+                            />
+                          </div>
+                          <span className="text-sm text-muted-foreground">
+                            {Math.round((analysis.userAnalysis?.communicationStyle?.fluency || 0) * 100)}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-4">
+                      {analysis.userAnalysis?.communicationStyle?.description || 'No description available'}
+                    </p>
+                  </Card>
+
+                  {/* Speech Patterns */}
+                  <Card className="p-6">
+                    <h3 className="text-lg font-semibold mb-4">Speech Patterns</h3>
+                    <div className="space-y-6">
+                      <div>
+                        <h4 className="text-sm font-medium mb-2">Hesitations</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-2xl font-bold">{analysis.userAnalysis?.hesitations?.count || 0}</p>
+                            <p className="text-sm text-muted-foreground">Total hesitations detected</p>
+                            <p className="text-sm mt-2">
+                              <span className="font-medium">Frequency:</span>{' '}
+                              <span className={`${
+                                parseFloat(analysis.userAnalysis?.hesitations?.frequency || '0') > 10 
+                                  ? 'text-red-500' 
+                                  : parseFloat(analysis.userAnalysis?.hesitations?.frequency || '0') > 5 
+                                  ? 'text-yellow-500' 
+                                  : 'text-green-500'
+                              }`}>
+                                {analysis.userAnalysis?.hesitations?.frequency || '0'}
+                              </span>
+                            </p>
+                          </div>
+                          {analysis.userAnalysis?.hesitations?.detailedAnalysis && (
+                            <div>
+                              <p className="text-sm mb-2">Types of Hesitations:</p>
+                              <div className="space-y-2">
+                                <div className="flex justify-between">
+                                  <span className="text-sm">Fillers:</span>
+                                  <span className="text-sm font-medium">{analysis.userAnalysis.hesitations.detailedAnalysis.types?.fillers || 0}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-sm">Hesitations:</span>
+                                  <span className="text-sm font-medium">{analysis.userAnalysis.hesitations.detailedAnalysis.types?.hesitations || 0}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-sm">Repetitions:</span>
+                                  <span className="text-sm font-medium">{analysis.userAnalysis.hesitations.detailedAnalysis.types?.repetitions || 0}</span>
+                                </div>
+                                <Badge variant={
+                                  analysis.userAnalysis.hesitations.detailedAnalysis.severity === 'High' ? 'destructive' :
+                                  analysis.userAnalysis.hesitations.detailedAnalysis.severity === 'Medium' ? 'secondary' :
+                                  'default'
+                                }>
+                                  {analysis.userAnalysis.hesitations.detailedAnalysis.severity || 'Low'} Impact
+                                </Badge>
+                              </div>
+                              <div className="mt-4">
+                                <p className="text-sm font-medium mb-2">Common instances:</p>
+                                <div className="flex flex-wrap gap-2">
+                                  {(analysis.userAnalysis.hesitations.instances || []).slice(0, 5).map((instance, i) => (
+                                    <Badge key={i} variant="secondary">{instance}</Badge>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-4">
+                          {analysis.userAnalysis?.hesitations?.impact || 'No impact analysis available'}
+                        </p>
+                      </div>
+
+                      <Separator />
+
+                      <div>
+                        <h4 className="text-sm font-medium mb-4">Grammar & Structure</h4>
+                        <div className="space-y-4">
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="text-sm">Overall Score</p>
+                              <Badge variant={
+                                (analysis.userAnalysis?.grammarAndStructure?.score || 0) > 0.7 ? 'default' :
+                                (analysis.userAnalysis?.grammarAndStructure?.score || 0) > 0.4 ? 'secondary' : 'destructive'
+                              }>
+                                {Math.round((analysis.userAnalysis?.grammarAndStructure?.score || 0) * 100)}%
+                              </Badge>
+                            </div>
+                            {analysis.userAnalysis?.grammarAndStructure?.issues && analysis.userAnalysis.grammarAndStructure.issues.length > 0 && (
+                              <div className="mt-4">
+                                <p className="text-sm font-medium mb-2">Areas for Improvement:</p>
+                                <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
+                                  {analysis.userAnalysis.grammarAndStructure.issues.map((issue, i) => (
+                                    <li key={i}>{issue}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+
+                  {/* Improvements */}
+                  <Card className="p-6">
+                    <h3 className="text-lg font-semibold mb-4">Suggested Improvements</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div>
+                        <h4 className="text-sm font-medium mb-2">Immediate Actions</h4>
+                        <ul className="list-disc list-inside text-sm text-muted-foreground space-y-2">
+                          {(analysis.userAnalysis?.improvements?.immediate || []).map((improvement, i) => (
+                            <li key={i}>{improvement}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-medium mb-2">Long-term Goals</h4>
+                        <ul className="list-disc list-inside text-sm text-muted-foreground space-y-2">
+                          {(analysis.userAnalysis?.improvements?.longTerm || []).map((improvement, i) => (
+                            <li key={i}>{improvement}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  </Card>
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>  
+      </div>
+    </FadeInUp>
+  )
+}

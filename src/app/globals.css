@@ -1,0 +1,236 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-20px); }
+}
+
+@keyframes ripple {
+  0% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
+
+@keyframes ripple-delay {
+  0% { transform: scale(1); opacity: 0.4; }
+  100% { transform: scale(1.7); opacity: 0; }
+}
+
+@keyframes ripple-slow {
+  0% { transform: scale(1); opacity: 0.2; }
+  100% { transform: scale(2); opacity: 0; }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-ripple {
+  animation: ripple 2s linear infinite;
+}
+
+.animate-ripple-delay {
+  animation: ripple-delay 2s infinite 0.3s;
+}
+
+.animate-ripple-slow {
+  animation: ripple-slow 2s infinite 0.6s;
+}
+
+@layer base {
+  :root {
+  --background: #ffffff;
+  --foreground: #333333;
+  --card: #ffffff;
+  --card-foreground: #333333;
+  --popover: #ffffff;
+  --popover-foreground: #333333;
+  --primary: #573dff;
+  --primary-foreground: #ffffff;
+  --secondary: #e7e7ea;
+  --secondary-foreground: #4e4d58;
+  --muted: #ececef;
+  --muted-foreground: #6c6b75;
+  --accent: #d6d9f0;
+  --accent-foreground: #433669;
+  --destructive: #c09264;
+  --destructive-foreground: #ffffff;
+  --border: #dbdadf;
+  --input: #dbdadf;
+  --ring: #6b5fc3;
+  --chart-1: #6b5fc3;
+  --chart-2: #604db6;
+  --chart-3: #5d48a1;
+  --chart-4: #513f84;
+  --chart-5: #433669;
+  --sidebar: #ececef;
+  --sidebar-foreground: #333333;
+  --sidebar-primary: #6b5fc3;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #d6d9f0;
+  --sidebar-accent-foreground: #433669;
+  --sidebar-border: #dbdadf;
+  --sidebar-ring: #6b5fc3;
+  --font-sans: Poppins, sans-serif;
+  --font-serif: Roboto, sans-serif;
+  --font-mono: JetBrains Mono, monospace;
+  --radius: 0.7rem;
+  --shadow-2xs: 0 1px 0px 0px hsl(0 0% 0% / 0.05);
+  --shadow-xs: 0 1px 0px 0px hsl(0 0% 0% / 0.05);
+  --shadow-sm: 0 1px 0px 0px hsl(0 0% 0% / 0.10), 0 1px 2px -1px hsl(0 0% 0% / 0.10);
+  --shadow: 0 1px 0px 0px hsl(0 0% 0% / 0.10), 0 1px 2px -1px hsl(0 0% 0% / 0.10);
+  --shadow-md: 0 1px 0px 0px hsl(0 0% 0% / 0.10), 0 2px 4px -1px hsl(0 0% 0% / 0.10);
+  --shadow-lg: 0 1px 0px 0px hsl(0 0% 0% / 0.10), 0 4px 6px -1px hsl(0 0% 0% / 0.10);
+  --shadow-xl: 0 1px 0px 0px hsl(0 0% 0% / 0.10), 0 8px 10px -1px hsl(0 0% 0% / 0.10);
+  --shadow-2xl: 0 1px 0px 0px hsl(0 0% 0% / 0.25);
+  --tracking-normal: 0em;
+  --spacing: 0.26rem;
+}
+
+.dark {
+  --background: #171717;
+  --foreground: #e5e5e5;
+  --card: #262626;
+  --card-foreground: #e5e5e5;
+  --popover: #262626;
+  --popover-foreground: #e5e5e5;
+  --primary: #6b5fc3;
+  --primary-foreground: #ffffff;
+  --secondary: #262626;
+  --secondary-foreground: #e5e5e5;
+  --muted: #262626;
+  --muted-foreground: #a3a3a3;
+  --accent: #433669;
+  --accent-foreground: #c1bee9;
+  --destructive: #c09264;
+  --destructive-foreground: #ffffff;
+  --border: #404040;
+  --input: #404040;
+  --ring: #6b5fc3;
+  --chart-1: #7e7acf;
+  --chart-2: #6b5fc3;
+  --chart-3: #604db6;
+  --chart-4: #5d48a1;
+  --chart-5: #513f84;
+  --sidebar: #171717;
+  --sidebar-foreground: #e5e5e5;
+  --sidebar-primary: #6b5fc3;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #433669;
+  --sidebar-accent-foreground: #c1bee9;
+  --sidebar-border: #404040;
+  --sidebar-ring: #6b5fc3;
+  --font-sans: Poppins, sans-serif;
+  --font-serif: Roboto, sans-serif;
+  --font-mono: JetBrains Mono, monospace;
+  --radius: 0.7rem;
+  --shadow-2xs: 0 1px 0px 0px hsl(0 0% 0% / 0.05);
+  --shadow-xs: 0 1px 0px 0px hsl(0 0% 0% / 0.05);
+  --shadow-sm: 0 1px 0px 0px hsl(0 0% 0% / 0.10), 0 1px 2px -1px hsl(0 0% 0% / 0.10);
+  --shadow: 0 1px 0px 0px hsl(0 0% 0% / 0.10), 0 1px 2px -1px hsl(0 0% 0% / 0.10);
+  --shadow-md: 0 1px 0px 0px hsl(0 0% 0% / 0.10), 0 2px 4px -1px hsl(0 0% 0% / 0.10);
+  --shadow-lg: 0 1px 0px 0px hsl(0 0% 0% / 0.10), 0 4px 6px -1px hsl(0 0% 0% / 0.10);
+  --shadow-xl: 0 1px 0px 0px hsl(0 0% 0% / 0.10), 0 8px 10px -1px hsl(0 0% 0% / 0.10);
+  --shadow-2xl: 0 1px 0px 0px hsl(0 0% 0% / 0.25);
+}
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+  }
+}
+
+@keyframes ripple {
+  0% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+@keyframes wave {
+  0%, 100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(1.5);
+  }
+}
+
+.animate-ripple {
+  animation: ripple 2s infinite;
+}
+
+.animate-wave {
+  animation: wave 1.5s ease-in-out infinite;
+}
+
+.page-transition {
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes wave {
+  0% {
+    height: 10%;
+  }
+  50% {
+    height: 100%;
+  }
+  100% {
+    height: 10%;
+  }
+}
+
+.animate-wave {
+  animation: wave 1s ease-in-out infinite;
+}
+
+/* Add fade-in animation for page transitions */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.page-transition {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+/* Add to your existing styles */
+
+@layer utilities {
+  .sidebar-open {
+    @apply lg:ml-[280px];
+  }
+  
+  .sidebar-closed {
+    @apply ml-0;
+  }
+  
+  .sidebar-width {
+    width: 250px;
+  }
+  
+  .sidebar-transition {
+    @apply transition-all duration-300 ease-in-out;
+  }
+}
+
+/* Ensure content doesn't shift on mobile */
+@media (max-width: 768px) {
+  .sidebar-open {
+    @apply ml-0;
+  }
+}
